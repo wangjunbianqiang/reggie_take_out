@@ -16,10 +16,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang.StringUtils;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @RestController
@@ -34,6 +37,9 @@ public class DishController {
     @Autowired
     private CategoryService categoryService;
 
+    @Autowired
+    private RedisTemplate redisTemplate;
+
     /**
      * 新增菜品
      * 这里的DishDto接收前端页面传过来的数据。里面有个列表是DishFlavor里的数据
@@ -47,6 +53,14 @@ public class DishController {
     public R<String> save(@RequestBody DishDto dishDto){  //这里dishDto并没有接收到dish_id，需要由DishService中重写的方法来提供
         log.info(dishDto.toString());
         dishService.saveWithFlavor(dishDto);
+
+        //1.清理redis中的全部缓存           感觉最好是全部清理，因为其它的套餐啥的都涉及了菜品
+        Set keys = redisTemplate.keys("dish_*");
+        redisTemplate.delete(keys);
+
+        //精准清理
+//        String key = "dish_" + dishDto.getCategoryId() + "_1";
+//        redisTemplate.delete(key);
         return R.success("新增菜品成功......");
     }
 
@@ -128,6 +142,9 @@ public class DishController {
 
     /**
      * 修改菜品
+     * 为避免后端增加记录或者更新记录造成的脏读，需要在增加记录和更新记录时，把redis中的缓存清理掉
+     * 有两种方式：
+     * 一种是全部清理；另外一种是只清理对应的分类(精确清理)
      * @param dishDto
      * @return
      */
@@ -135,6 +152,14 @@ public class DishController {
     public R<String> update(@RequestBody DishDto dishDto){
         log.info(dishDto.toString());
         dishService.updateWithFlavor(dishDto);
+        //1.清理redis中的全部缓存           感觉最好是全部清理，因为其它的套餐啥的都涉及了菜品
+        Set keys = redisTemplate.keys("dish_*");
+        redisTemplate.delete(keys);
+
+        //精准清理
+//        String key = "dish_" + dishDto.getCategoryId() + "_1";
+//        redisTemplate.delete(key);
+
         return R.success("修改菜品成功......");
     }
 
@@ -249,11 +274,24 @@ public class DishController {
 
     /**
      * 根据分类id查询该分类下对应的菜品
+     * redis优化，根据分类id缓存菜品
      * @param dish
      * @return
      */
     @GetMapping("/list")
     public R<List<DishDto>> list(Dish dish){
+        //动态获取key
+        String key = "dish_" + dish.getCategoryId() + "_" + dish.getStatus();  //dish_15487464987684878_1   作为redis中的key
+
+        List<DishDto> dishDtoList = null;
+        //先从redis中获取缓存数据，根据分类ID进行获取，需要先生成Category_id作为key
+        dishDtoList = (List<DishDto>) redisTemplate.opsForValue().get(key);
+
+        //如果存在，直接返回，就不需要查询数据库了
+        if(dishDtoList != null){
+            return R.success(dishDtoList);
+        }
+
         //根据菜品分类id查询菜品
         LambdaQueryWrapper<Dish> dishLambdaQueryWrapper = new LambdaQueryWrapper<>();
 
@@ -268,7 +306,7 @@ public class DishController {
         List<Dish> list = dishService.list(dishLambdaQueryWrapper);
 
         //根据分页查询的记录一个一个处理
-        List<DishDto> dishDtoList = list.stream().map((item) -> {
+       dishDtoList = list.stream().map((item) -> {
             //这里是自己new出来对象，需要在把分页查询出来的item复制到这个新new出来的对象中，
             // 不然这个新new出来的属性中除了下面的setCategoryName，没有其它属性了
             DishDto dishDto = new DishDto();
@@ -290,6 +328,9 @@ public class DishController {
 
             return dishDto;
         }).collect(Collectors.toList());
+
+        //如果不存在，就需要从数据库中查询，再将查询到的数据放到redis中去，根据分类Id放到redis中,设置过期时间60分钟
+        redisTemplate.opsForValue().set(key,dishDtoList,60, TimeUnit.MINUTES);
 
         return R.success(dishDtoList);
     }
