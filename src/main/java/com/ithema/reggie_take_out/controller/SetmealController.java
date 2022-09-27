@@ -14,6 +14,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang.StringUtils;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
@@ -35,10 +37,12 @@ public class SetmealController {
 
     /**
      * 点击保存按钮后，新增套餐
+     * 优化：添加后，需要把redis中的缓存清理掉
      * @param setmealDto
      * @return
      */
     @PostMapping
+    @CacheEvict(value = "setmealCache",allEntries = true)   //清理redis中所有名称为setmealCache的缓存
     public R<String> save(@RequestBody SetmealDto setmealDto){
         log.info(setmealDto.toString());
         //需要在setmealService中重写save方法
@@ -114,10 +118,12 @@ public class SetmealController {
 
     /**
      * 修改套餐信息
+     * 优化：更新后应该清理掉相应的缓存
      * @param setmealDto
      * @return
      */
     @PutMapping
+    @CacheEvict(value = "setmealCache",allEntries = true)   //清理redis中所有名称为setmealCache的缓存
     public R<String> update(@RequestBody SetmealDto setmealDto){
         setmealService.updateWithsetmeal_dish(setmealDto);
         return R.success("修改套餐成功......");
@@ -128,10 +134,12 @@ public class SetmealController {
 
     /**
      * 批量删除
+     * 优化：删除后需要将redis中的名称为setmealCache的缓存清理掉
      * @param ids
      * @return
      */
     @DeleteMapping
+    @CacheEvict(value = "setmealCache",allEntries = true)   //清理redis中所有名称为setmealCache的缓存
     public R<String> deleteByBatch(String ids){  //ids是dish_id
         if(ids == ""){
             return R.error("id为空,请选择删除对象");
@@ -161,7 +169,7 @@ public class SetmealController {
         dishFlavorLambdaQueryWrapper.in(SetmealDish::getSetmealId,list);
         setmealDishService.remove(dishFlavorLambdaQueryWrapper);
 
-        return R.success("批量删除菜品成功......");
+        return R.success("批量删除套餐成功......");
     }
 
 
@@ -195,9 +203,11 @@ public class SetmealController {
     /**
      * 根据套餐id查询该套餐下对应的菜品
      * @param setmeal
+     * 优化：使用spring-cache注解将套餐放入redis中
      * @return
      */
     @GetMapping("/list")
+    @Cacheable(value = "setmealCache",key = "#setmeal.categoryId + '_' + #setmeal.status")  //将套餐信息放入缓存中，key为前端获取的setmeal.categoryId + '_' + setmeal.status拼接而成
     public R<List<Setmeal>> list(Setmeal setmeal){
         LambdaQueryWrapper<Setmeal> setmealLambdaQueryWrapper = new LambdaQueryWrapper<>();
 
