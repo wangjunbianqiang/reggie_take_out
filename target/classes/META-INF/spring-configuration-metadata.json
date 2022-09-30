@@ -1,0 +1,12 @@
+{
+  "groups": [
+    {
+      "name": "spring.datasource.druid",
+      "type": "javax.sql.DataSource",
+      "sourceType": "com.ithema.reggie_take_out.config.MyDataSourceConfig",
+      "sourceMethod": "dataSource()"
+    }
+  ],
+  "properties": [],
+  "hints": []
+}
